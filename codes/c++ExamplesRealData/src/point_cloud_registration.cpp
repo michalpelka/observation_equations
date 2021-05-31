@@ -1,4 +1,9 @@
+#ifdef __APPLE__
+#include <GLUT/glut.h>
+#else
 #include <GL/freeglut.h>
+#endif
+
 #include <vector>
 #include <Eigen/Eigen>
 #include <iostream>
@@ -19,6 +24,8 @@
 
 
 #include "../../point_to_point_tait_bryan_wc_jacobian.h"
+#include "../../point_to_point_quaternion_wc_jacobian.h"
+#include "../../point_to_point_rodrigues_wc_jacobian.h"
 
 
 struct ScanPose{
@@ -496,6 +503,182 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 			}
 			break;
 		}
+		case 'r':{
+			std::vector<Eigen::Triplet<double>> tripletListA;
+			std::vector<Eigen::Triplet<double>> tripletListP;
+			std::vector<Eigen::Triplet<double>> tripletListB;
+
+			for(size_t i = 0 ; i < scan_poses.size() ; i++){
+				for(size_t j = i+1 ; j < scan_poses.size() ; j++){
+					//if(i == j)continue;
+					std::vector<std::pair<int,int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
+					std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size() << std::endl;
+
+					RodriguesPose pose_1 = pose_rodrigues_from_affine_matrix(scan_poses[i].m);
+					RodriguesPose pose_2 = pose_rodrigues_from_affine_matrix(scan_poses[j].m);
+
+                                        for(size_t k = 0 ; k < nn.size(); k+=1){
+						pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
+						pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
+						double delta_x;
+						double delta_y;
+						double delta_z;
+						point_to_point_rodrigues_wc(delta_x, delta_y, delta_z,
+                                                                            pose_1.px, pose_1.py, pose_1.pz, pose_1.sx, pose_1.sy, pose_1.sz,
+                                                                            pose_2.px, pose_2.py, pose_2.pz, pose_2.sx, pose_2.sy, pose_2.sz,
+                                                                            p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+
+
+
+                                                Eigen::Matrix<double, 3, 12, Eigen::RowMajor> jacobian;
+						point_to_point_rodrigues_wc_jacobian(jacobian,
+                                                                                     pose_1.px, pose_1.py, pose_1.pz, pose_1.sx, pose_1.sy, pose_1.sz,
+                                                                                     pose_2.px, pose_2.py, pose_2.pz, pose_2.sx, pose_2.sy, pose_2.sz,
+                                                                                     p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+
+						int ir = tripletListB.size();
+						int ic_1 = i * 6;
+						int ic_2 = j * 6;
+
+						tripletListA.emplace_back(ir     , ic_1    , -jacobian(0,0));
+						tripletListA.emplace_back(ir     , ic_1 + 1, -jacobian(0,1));
+						tripletListA.emplace_back(ir     , ic_1 + 2, -jacobian(0,2));
+						tripletListA.emplace_back(ir     , ic_1 + 3, -jacobian(0,3));
+						tripletListA.emplace_back(ir     , ic_1 + 4, -jacobian(0,4));
+						tripletListA.emplace_back(ir     , ic_1 + 5, -jacobian(0,5));
+
+						tripletListA.emplace_back(ir     , ic_2    , -jacobian(0,6));
+						tripletListA.emplace_back(ir     , ic_2 + 1, -jacobian(0,7));
+						tripletListA.emplace_back(ir     , ic_2 + 2, -jacobian(0,8));
+						tripletListA.emplace_back(ir     , ic_2 + 3, -jacobian(0,9));
+						tripletListA.emplace_back(ir     , ic_2 + 4, -jacobian(0,10));
+						tripletListA.emplace_back(ir     , ic_2 + 5, -jacobian(0,11));
+
+						tripletListA.emplace_back(ir + 1 , ic_1    , -jacobian(1,0));
+						tripletListA.emplace_back(ir + 1 , ic_1 + 1, -jacobian(1,1));
+						tripletListA.emplace_back(ir + 1 , ic_1 + 2, -jacobian(1,2));
+						tripletListA.emplace_back(ir + 1 , ic_1 + 3, -jacobian(1,3));
+						tripletListA.emplace_back(ir + 1 , ic_1 + 4, -jacobian(1,4));
+						tripletListA.emplace_back(ir + 1 , ic_1 + 5, -jacobian(1,5));
+
+						tripletListA.emplace_back(ir + 1 , ic_2    , -jacobian(1,6));
+						tripletListA.emplace_back(ir + 1 , ic_2 + 1, -jacobian(1,7));
+						tripletListA.emplace_back(ir + 1 , ic_2 + 2, -jacobian(1,8));
+						tripletListA.emplace_back(ir + 1 , ic_2 + 3, -jacobian(1,9));
+						tripletListA.emplace_back(ir + 1 , ic_2 + 4, -jacobian(1,10));
+						tripletListA.emplace_back(ir + 1 , ic_2 + 5, -jacobian(1,11));
+
+						tripletListA.emplace_back(ir + 2 , ic_1    , -jacobian(2,0));
+						tripletListA.emplace_back(ir + 2 , ic_1 + 1, -jacobian(2,1));
+						tripletListA.emplace_back(ir + 2 , ic_1 + 2, -jacobian(2,2));
+						tripletListA.emplace_back(ir + 2 , ic_1 + 3, -jacobian(2,3));
+						tripletListA.emplace_back(ir + 2 , ic_1 + 4, -jacobian(2,4));
+						tripletListA.emplace_back(ir + 2 , ic_1 + 5, -jacobian(2,5));
+
+						tripletListA.emplace_back(ir + 2 , ic_2    , -jacobian(2,6));
+						tripletListA.emplace_back(ir + 2 , ic_2 + 1, -jacobian(2,7));
+						tripletListA.emplace_back(ir + 2 , ic_2 + 2, -jacobian(2,8));
+						tripletListA.emplace_back(ir + 2 , ic_2 + 3, -jacobian(2,9));
+						tripletListA.emplace_back(ir + 2 , ic_2 + 4, -jacobian(2,10));
+						tripletListA.emplace_back(ir + 2 , ic_2 + 5, -jacobian(2,11));
+
+						tripletListP.emplace_back(ir    , ir    ,  1);//cauchy(delta_x, 1));
+						tripletListP.emplace_back(ir + 1, ir + 1,  1);//cauchy(delta_y, 1));
+						tripletListP.emplace_back(ir + 2, ir + 2,  1);//cauchy(delta_z, 1));
+
+						tripletListB.emplace_back(ir    , 0,  delta_x);
+						tripletListB.emplace_back(ir + 1, 0,  delta_y);
+						tripletListB.emplace_back(ir + 2, 0,  delta_z);
+					}
+				}
+			}
+
+			int ir = tripletListB.size();
+			tripletListA.emplace_back(ir     , 0, 1);
+			tripletListA.emplace_back(ir + 1 , 1, 1);
+			tripletListA.emplace_back(ir + 2 , 2, 1);
+			tripletListA.emplace_back(ir + 3 , 3, 1);
+			tripletListA.emplace_back(ir + 4 , 4, 1);
+			tripletListA.emplace_back(ir + 5 , 5, 1);
+
+			tripletListP.emplace_back(ir     , ir,     1000000);
+			tripletListP.emplace_back(ir + 1 , ir + 1, 1000000);
+			tripletListP.emplace_back(ir + 2 , ir + 2, 1000000);
+			tripletListP.emplace_back(ir + 3 , ir + 3, 1000000);
+			tripletListP.emplace_back(ir + 4 , ir + 4, 1000000);
+			tripletListP.emplace_back(ir + 5 , ir + 5, 1000000);
+
+			tripletListB.emplace_back(ir     , 0, 0);
+			tripletListB.emplace_back(ir + 1 , 0, 0);
+			tripletListB.emplace_back(ir + 2 , 0, 0);
+			tripletListB.emplace_back(ir + 3 , 0, 0);
+			tripletListB.emplace_back(ir + 4 , 0, 0);
+			tripletListB.emplace_back(ir + 5 , 0, 0);
+
+			Eigen::SparseMatrix<double> matA(tripletListB.size(), scan_poses.size() * 6);
+			Eigen::SparseMatrix<double> matP(tripletListB.size(), tripletListB.size());
+			Eigen::SparseMatrix<double> matB(tripletListB.size(), 1);
+
+			matA.setFromTriplets(tripletListA.begin(), tripletListA.end());
+			matP.setFromTriplets(tripletListP.begin(), tripletListP.end());
+			matB.setFromTriplets(tripletListB.begin(), tripletListB.end());
+
+			Eigen::SparseMatrix<double> AtPA(scan_poses.size() * 6, scan_poses.size() * 6);
+			Eigen::SparseMatrix<double> AtPB(scan_poses.size() * 6, 1);
+
+			{
+			Eigen::SparseMatrix<double> AtP = matA.transpose() * matP;
+			AtPA = (AtP) * matA;
+			AtPB = (AtP) * matB;
+			}
+
+			tripletListA.clear();
+			tripletListP.clear();
+			tripletListB.clear();
+
+
+			std::cout << "AtPA.size: " << AtPA.size() << std::endl;
+			std::cout << "AtPB.size: " << AtPB.size() << std::endl;
+
+			std::cout << "start solving AtPA=AtPB" << std::endl;
+			Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> solver(AtPA);
+
+			std::cout << "x = solver.solve(AtPB)" << std::endl;
+			Eigen::SparseMatrix<double> x = solver.solve(AtPB);
+
+			std::vector<double> h_x;
+
+			for (int k=0; k<x.outerSize(); ++k){
+				for (Eigen::SparseMatrix<double>::InnerIterator it(x,k); it; ++it){
+					h_x.push_back(it.value());
+				}
+			}
+
+			if(h_x.size() == scan_poses.size() * 6){
+				for(size_t i = 0 ; i < h_x.size(); i++){
+					std::cout << h_x[i] << std::endl;
+				}
+				std::cout << "AtPA=AtPB SOLVED" << std::endl;
+				std::cout << "update" << std::endl;
+
+				int counter = 0;
+
+				for(size_t i = 0; i < scan_poses.size(); i++){
+					RodriguesPose pose = pose_rodrigues_from_affine_matrix(scan_poses[i].m);
+					pose.px += h_x[counter++];
+					pose.py += h_x[counter++];
+					pose.pz += h_x[counter++];
+					pose.sx += h_x[counter++];
+					pose.sy += h_x[counter++];
+					pose.sz += h_x[counter++];
+
+					scan_poses[i].m = affine_matrix_from_pose_rodrigues(pose);
+				}
+			}else{
+				std::cout << "AtPA=AtPB FAILED" << std::endl;
+			}
+			break;
+		}
 		case 'l':{
 			std::vector<Eigen::Triplet<double>> tripletListA;
 			std::vector<Eigen::Triplet<double>> tripletListP;
@@ -745,6 +928,7 @@ void printHelp() {
 	std::cout << "awsdzx: move current_scan (green)" << std::endl;
 	std::cout << "p: print poses" << std::endl;
 	std::cout << "t: optimize (Tait-Bryan)" << std::endl;
+	std::cout << "r: optimize (Rodriges)" << std::endl;
 	std::cout << "l: optimize (Lie algebra)" << std::endl;
 	std::cout << "1: sradius -= 0.01" << std::endl;
 	std::cout << "2: sradius += 0.01" << std::endl;
