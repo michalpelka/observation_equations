@@ -47,6 +47,9 @@ build
 *.orig
 .ipynb_checkpoints/
 
+cmake-*/
+build/
+
 *.pyc
 
  codes/__pycache__/*

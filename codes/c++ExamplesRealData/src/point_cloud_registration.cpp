@@ -27,7 +27,8 @@
 #include "../../point_to_point_quaternion_wc_jacobian.h"
 #include "../../point_to_point_rodrigues_wc_jacobian.h"
 
-
+#include <thread>
+#include <mutex>
 struct ScanPose{
 	Eigen::Affine3d m;
 	pcl::PointCloud<pcl::PointXYZ> pc;
@@ -335,88 +336,302 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 			pairs_temp = nns(scan_poses[0], scan_poses[1], sradius);
 			break;
 		}
+		case 'q':{
+			std::vector<Eigen::Triplet<double>> tripletListA;
+			std::vector<Eigen::Triplet<double>> tripletListP;
+			std::vector<Eigen::Triplet<double>> tripletListB;
+
+            std::vector<std::thread> threads;
+            std::mutex mutex;
+
+			for(size_t i = 0 ; i < scan_poses.size() ; i++){
+				for(size_t j = i+1 ; j < scan_poses.size() ; j++){
+					if(i == j)continue;
+                    auto thread = std::thread([&, i, j]() {
+                        std::vector<std::pair<int, int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
+                        std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size()
+                                  << std::endl;
+
+                        QuaternionPose pose_1 = pose_quaternion_from_affine_matrix(scan_poses[i].m);
+                        QuaternionPose pose_2 = pose_quaternion_from_affine_matrix(scan_poses[j].m);
+
+                        for (size_t k = 0; k < nn.size(); k += 1) {
+                            pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
+                            pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
+                            double delta_x;
+                            double delta_y;
+                            double delta_z;
+                            point_to_point_quaternion_wc(delta_x, delta_y, delta_z,
+                                                         pose_1.px, pose_1.py, pose_1.pz, pose_1.q0, pose_1.q1,
+                                                         pose_1.q2, pose_1.q3,
+                                                         pose_2.px, pose_2.py, pose_2.pz, pose_2.q0, pose_2.q1,
+                                                         pose_2.q2, pose_2.q3,
+                                                         p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+
+                            Eigen::Matrix<double, 3, 14, Eigen::RowMajor> jacobian;
+                            point_to_point_quaternion_wc_jacobian(jacobian,
+                                                                  pose_1.px, pose_1.py, pose_1.pz, pose_1.q0, pose_1.q1,
+                                                                  pose_1.q2, pose_1.q3,
+                                                                  pose_2.px, pose_2.py, pose_2.pz, pose_2.q0, pose_2.q1,
+                                                                  pose_2.q2, pose_2.q3,
+                                                                  p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+                            std::lock_guard<std::mutex> lck (mutex);
+                            int ir = tripletListB.size();
+                            int ic_1 = i * 7;
+                            int ic_2 = j * 7;
+
+                            tripletListA.emplace_back(ir, ic_1, -jacobian(0, 0));
+                            tripletListA.emplace_back(ir, ic_1 + 1, -jacobian(0, 1));
+                            tripletListA.emplace_back(ir, ic_1 + 2, -jacobian(0, 2));
+                            tripletListA.emplace_back(ir, ic_1 + 3, -jacobian(0, 3));
+                            tripletListA.emplace_back(ir, ic_1 + 4, -jacobian(0, 4));
+                            tripletListA.emplace_back(ir, ic_1 + 5, -jacobian(0, 5));
+                            tripletListA.emplace_back(ir, ic_1 + 6, -jacobian(0, 6));
+
+                            tripletListA.emplace_back(ir, ic_2, -jacobian(0, 7));
+                            tripletListA.emplace_back(ir, ic_2 + 1, -jacobian(0, 8));
+                            tripletListA.emplace_back(ir, ic_2 + 2, -jacobian(0, 9));
+                            tripletListA.emplace_back(ir, ic_2 + 3, -jacobian(0, 10));
+                            tripletListA.emplace_back(ir, ic_2 + 4, -jacobian(0, 11));
+                            tripletListA.emplace_back(ir, ic_2 + 5, -jacobian(0, 12));
+                            tripletListA.emplace_back(ir, ic_2 + 6, -jacobian(0, 13));
+
+                            tripletListA.emplace_back(ir + 1, ic_1, -jacobian(1, 0));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 1, -jacobian(1, 1));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 2, -jacobian(1, 2));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 3, -jacobian(1, 3));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 4, -jacobian(1, 4));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 5, -jacobian(1, 5));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 6, -jacobian(1, 6));
+
+                            tripletListA.emplace_back(ir + 1, ic_2, -jacobian(1, 7));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 1, -jacobian(1, 8));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 2, -jacobian(1, 9));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 3, -jacobian(1, 10));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 4, -jacobian(1, 11));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 5, -jacobian(1, 12));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 6, -jacobian(1, 13));
+
+                            tripletListA.emplace_back(ir + 2, ic_1, -jacobian(2, 0));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 1, -jacobian(2, 1));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 2, -jacobian(2, 2));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 3, -jacobian(2, 3));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 4, -jacobian(2, 4));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 5, -jacobian(2, 5));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 6, -jacobian(2, 6));
+
+                            tripletListA.emplace_back(ir + 2, ic_2, -jacobian(2, 7));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 1, -jacobian(2, 8));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 2, -jacobian(2, 9));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 3, -jacobian(2, 10));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 4, -jacobian(2, 11));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 5, -jacobian(2, 12));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 6, -jacobian(2, 13));
+
+                            tripletListP.emplace_back(ir, ir, cauchy(delta_x, 1));
+                            tripletListP.emplace_back(ir + 1, ir + 1, cauchy(delta_y, 1));
+                            tripletListP.emplace_back(ir + 2, ir + 2, cauchy(delta_z, 1));
+
+                            tripletListB.emplace_back(ir, 0, delta_x);
+                            tripletListB.emplace_back(ir + 1, 0, delta_y);
+                            tripletListB.emplace_back(ir + 2, 0, delta_z);
+                        }
+                    });
+                    threads.emplace_back(std::move(thread));
+				}
+			}
+
+            for (auto &t : threads){t.join();}
+
+			int ir = tripletListB.size();
+
+			tripletListA.emplace_back(ir     , 0, 1);
+			tripletListA.emplace_back(ir + 1 , 1, 1);
+			tripletListA.emplace_back(ir + 2 , 2, 1);
+			tripletListA.emplace_back(ir + 3 , 3, 1);
+			tripletListA.emplace_back(ir + 4 , 4, 1);
+			tripletListA.emplace_back(ir + 5 , 5, 1);
+			tripletListA.emplace_back(ir + 6 , 6, 1);
+
+			tripletListP.emplace_back(ir     , ir,     1000000);
+			tripletListP.emplace_back(ir + 1 , ir + 1, 1000000);
+			tripletListP.emplace_back(ir + 2 , ir + 2, 1000000);
+			tripletListP.emplace_back(ir + 3 , ir + 3, 1000000);
+			tripletListP.emplace_back(ir + 4 , ir + 4, 1000000);
+			tripletListP.emplace_back(ir + 5 , ir + 5, 1000000);
+			tripletListP.emplace_back(ir + 6 , ir + 6, 1000000);
+
+			tripletListB.emplace_back(ir     , 0, 0);
+			tripletListB.emplace_back(ir + 1 , 0, 0);
+			tripletListB.emplace_back(ir + 2 , 0, 0);
+			tripletListB.emplace_back(ir + 3 , 0, 0);
+			tripletListB.emplace_back(ir + 4 , 0, 0);
+			tripletListB.emplace_back(ir + 5 , 0, 0);
+			tripletListB.emplace_back(ir + 6 , 0, 0);
+
+			Eigen::SparseMatrix<double> matA(tripletListB.size(), scan_poses.size() * 7);
+			Eigen::SparseMatrix<double> matP(tripletListB.size(), tripletListB.size());
+			Eigen::SparseMatrix<double> matB(tripletListB.size(), 1);
+
+			matA.setFromTriplets(tripletListA.begin(), tripletListA.end());
+			matP.setFromTriplets(tripletListP.begin(), tripletListP.end());
+			matB.setFromTriplets(tripletListB.begin(), tripletListB.end());
+
+			Eigen::SparseMatrix<double> AtPA(scan_poses.size() * 7, scan_poses.size() * 7);
+			Eigen::SparseMatrix<double> AtPB(scan_poses.size() * 7, 1);
+
+			{
+				Eigen::SparseMatrix<double> AtP = matA.transpose() * matP;
+				AtPA = (AtP) * matA;
+				AtPB = (AtP) * matB;
+			}
+
+			tripletListA.clear();
+			tripletListP.clear();
+			tripletListB.clear();
+
+//
+			std::cout << "AtPA.size: " << AtPA.size() << std::endl;
+			std::cout << "AtPB.size: " << AtPB.size() << std::endl;
+
+			std::cout << "start solving AtPA=AtPB" << std::endl;
+			Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> solver(AtPA);
+
+			std::cout << "x = solver.solve(AtPB)" << std::endl;
+			Eigen::SparseMatrix<double> x = solver.solve(AtPB);
+//
+			std::vector<double> h_x;
+
+			for (int k=0; k<x.outerSize(); ++k){
+				for (Eigen::SparseMatrix<double>::InnerIterator it(x,k); it; ++it){
+					h_x.push_back(it.value());
+				}
+			}
+
+			if(h_x.size() == scan_poses.size() * 7){
+				for(size_t i = 0 ; i < h_x.size(); i++){
+					std::cout << h_x[i] << std::endl;
+				}
+				std::cout << "AtPA=AtPB SOLVED" << std::endl;
+				std::cout << "update" << std::endl;
+
+				int counter = 0;
+
+				for(size_t i = 0; i < scan_poses.size(); i++){
+
+
+					QuaternionPose pose = pose_quaternion_from_affine_matrix(scan_poses[i].m);
+					pose.px += h_x[counter++];
+					pose.py += h_x[counter++];
+					pose.pz += h_x[counter++];
+					pose.q0 += h_x[counter++];
+					pose.q1 += h_x[counter++];
+					pose.q2 += h_x[counter++];
+					pose.q3 += h_x[counter++];
+					scan_poses[i].m = affine_matrix_from_pose_quaternion(pose);
+				}
+			}else{
+				std::cout << "AtPA=AtPB FAILED" << std::endl;
+			}
+			break;
+		}
 		case 't':{
 			std::vector<Eigen::Triplet<double>> tripletListA;
 			std::vector<Eigen::Triplet<double>> tripletListP;
 			std::vector<Eigen::Triplet<double>> tripletListB;
 
+            std::vector<std::thread> threads;
+            std::mutex mutex;
+
 			for(size_t i = 0 ; i < scan_poses.size() ; i++){
 				for(size_t j = i+1 ; j < scan_poses.size() ; j++){
-					//if(i == j)continue;
-					std::vector<std::pair<int,int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
-					std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size() << std::endl;
+					if(i == j)continue;
+                    auto thread = std::thread([&, i, j]() {
 
-					TaitBryanPose pose_1 = pose_tait_bryan_from_affine_matrix(scan_poses[i].m);
-					TaitBryanPose pose_2 = pose_tait_bryan_from_affine_matrix(scan_poses[j].m);
+                        std::vector<std::pair<int, int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
+                        std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size()
+                                  << std::endl;
 
-					for(size_t k = 0 ; k < nn.size(); k+=1){
-						pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
-						pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
-						double delta_x;
-						double delta_y;
-						double delta_z;
-						point_to_point_tait_bryan_wc(delta_x, delta_y, delta_z, pose_1.px, pose_1.py, pose_1.pz, pose_1.om, pose_1.fi, pose_1.ka, pose_2.px, pose_2.py, pose_2.pz, pose_2.om, pose_2.fi, pose_2.ka, p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+                        TaitBryanPose pose_1 = pose_tait_bryan_from_affine_matrix(scan_poses[i].m);
+                        TaitBryanPose pose_2 = pose_tait_bryan_from_affine_matrix(scan_poses[j].m);
 
-						Eigen::Matrix<double, 3, 12, Eigen::RowMajor> jacobian;
-						point_to_point_tait_bryan_wc_jacobian(jacobian, pose_1.px, pose_1.py, pose_1.pz, pose_1.om, pose_1.fi, pose_1.ka, pose_2.px, pose_2.py, pose_2.pz, pose_2.om, pose_2.fi, pose_2.ka, p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+                        for (size_t k = 0; k < nn.size(); k += 1) {
+                            pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
+                            pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
+                            double delta_x;
+                            double delta_y;
+                            double delta_z;
+                            point_to_point_tait_bryan_wc(delta_x, delta_y, delta_z, pose_1.px, pose_1.py, pose_1.pz,
+                                                         pose_1.om, pose_1.fi, pose_1.ka, pose_2.px, pose_2.py,
+                                                         pose_2.pz, pose_2.om, pose_2.fi, pose_2.ka, p_1.x, p_1.y,
+                                                         p_1.z, p_2.x, p_2.y, p_2.z);
 
-						int ir = tripletListB.size();
-						int ic_1 = i * 6;
-						int ic_2 = j * 6;
+                            Eigen::Matrix<double, 3, 12, Eigen::RowMajor> jacobian;
+                            point_to_point_tait_bryan_wc_jacobian(jacobian, pose_1.px, pose_1.py, pose_1.pz, pose_1.om,
+                                                                  pose_1.fi, pose_1.ka, pose_2.px, pose_2.py, pose_2.pz,
+                                                                  pose_2.om, pose_2.fi, pose_2.ka, p_1.x, p_1.y, p_1.z,
+                                                                  p_2.x, p_2.y, p_2.z);
+                            std::lock_guard<std::mutex> lck (mutex);
+                            int ir = tripletListB.size();
+                            int ic_1 = i * 6;
+                            int ic_2 = j * 6;
 
-						tripletListA.emplace_back(ir     , ic_1    , -jacobian(0,0));
-						tripletListA.emplace_back(ir     , ic_1 + 1, -jacobian(0,1));
-						tripletListA.emplace_back(ir     , ic_1 + 2, -jacobian(0,2));
-						tripletListA.emplace_back(ir     , ic_1 + 3, -jacobian(0,3));
-						tripletListA.emplace_back(ir     , ic_1 + 4, -jacobian(0,4));
-						tripletListA.emplace_back(ir     , ic_1 + 5, -jacobian(0,5));
+                            tripletListA.emplace_back(ir, ic_1, -jacobian(0, 0));
+                            tripletListA.emplace_back(ir, ic_1 + 1, -jacobian(0, 1));
+                            tripletListA.emplace_back(ir, ic_1 + 2, -jacobian(0, 2));
+                            tripletListA.emplace_back(ir, ic_1 + 3, -jacobian(0, 3));
+                            tripletListA.emplace_back(ir, ic_1 + 4, -jacobian(0, 4));
+                            tripletListA.emplace_back(ir, ic_1 + 5, -jacobian(0, 5));
 
-						tripletListA.emplace_back(ir     , ic_2    , -jacobian(0,6));
-						tripletListA.emplace_back(ir     , ic_2 + 1, -jacobian(0,7));
-						tripletListA.emplace_back(ir     , ic_2 + 2, -jacobian(0,8));
-						tripletListA.emplace_back(ir     , ic_2 + 3, -jacobian(0,9));
-						tripletListA.emplace_back(ir     , ic_2 + 4, -jacobian(0,10));
-						tripletListA.emplace_back(ir     , ic_2 + 5, -jacobian(0,11));
+                            tripletListA.emplace_back(ir, ic_2, -jacobian(0, 6));
+                            tripletListA.emplace_back(ir, ic_2 + 1, -jacobian(0, 7));
+                            tripletListA.emplace_back(ir, ic_2 + 2, -jacobian(0, 8));
+                            tripletListA.emplace_back(ir, ic_2 + 3, -jacobian(0, 9));
+                            tripletListA.emplace_back(ir, ic_2 + 4, -jacobian(0, 10));
+                            tripletListA.emplace_back(ir, ic_2 + 5, -jacobian(0, 11));
 
-						tripletListA.emplace_back(ir + 1 , ic_1    , -jacobian(1,0));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 1, -jacobian(1,1));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 2, -jacobian(1,2));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 3, -jacobian(1,3));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 4, -jacobian(1,4));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 5, -jacobian(1,5));
+                            tripletListA.emplace_back(ir + 1, ic_1, -jacobian(1, 0));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 1, -jacobian(1, 1));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 2, -jacobian(1, 2));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 3, -jacobian(1, 3));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 4, -jacobian(1, 4));
+                            tripletListA.emplace_back(ir + 1, ic_1 + 5, -jacobian(1, 5));
 
-						tripletListA.emplace_back(ir + 1 , ic_2    , -jacobian(1,6));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 1, -jacobian(1,7));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 2, -jacobian(1,8));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 3, -jacobian(1,9));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 4, -jacobian(1,10));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 5, -jacobian(1,11));
+                            tripletListA.emplace_back(ir + 1, ic_2, -jacobian(1, 6));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 1, -jacobian(1, 7));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 2, -jacobian(1, 8));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 3, -jacobian(1, 9));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 4, -jacobian(1, 10));
+                            tripletListA.emplace_back(ir + 1, ic_2 + 5, -jacobian(1, 11));
 
-						tripletListA.emplace_back(ir + 2 , ic_1    , -jacobian(2,0));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 1, -jacobian(2,1));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 2, -jacobian(2,2));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 3, -jacobian(2,3));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 4, -jacobian(2,4));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 5, -jacobian(2,5));
+                            tripletListA.emplace_back(ir + 2, ic_1, -jacobian(2, 0));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 1, -jacobian(2, 1));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 2, -jacobian(2, 2));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 3, -jacobian(2, 3));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 4, -jacobian(2, 4));
+                            tripletListA.emplace_back(ir + 2, ic_1 + 5, -jacobian(2, 5));
 
-						tripletListA.emplace_back(ir + 2 , ic_2    , -jacobian(2,6));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 1, -jacobian(2,7));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 2, -jacobian(2,8));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 3, -jacobian(2,9));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 4, -jacobian(2,10));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 5, -jacobian(2,11));
+                            tripletListA.emplace_back(ir + 2, ic_2, -jacobian(2, 6));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 1, -jacobian(2, 7));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 2, -jacobian(2, 8));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 3, -jacobian(2, 9));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 4, -jacobian(2, 10));
+                            tripletListA.emplace_back(ir + 2, ic_2 + 5, -jacobian(2, 11));
 
-						tripletListP.emplace_back(ir    , ir    ,  1);//cauchy(delta_x, 1));
-						tripletListP.emplace_back(ir + 1, ir + 1,  1);//cauchy(delta_y, 1));
-						tripletListP.emplace_back(ir + 2, ir + 2,  1);//cauchy(delta_z, 1));
+                            tripletListP.emplace_back(ir, ir, 1);//cauchy(delta_x, 1));
+                            tripletListP.emplace_back(ir + 1, ir + 1, 1);//cauchy(delta_y, 1));
+                            tripletListP.emplace_back(ir + 2, ir + 2, 1);//cauchy(delta_z, 1));
 
-						tripletListB.emplace_back(ir    , 0,  delta_x);
-						tripletListB.emplace_back(ir + 1, 0,  delta_y);
-						tripletListB.emplace_back(ir + 2, 0,  delta_z);
-					}
-				}
-			}
+                            tripletListB.emplace_back(ir, 0, delta_x);
+                            tripletListB.emplace_back(ir + 1, 0, delta_y);
+                            tripletListB.emplace_back(ir + 2, 0, delta_z);
+                        }
+                    });
+                    threads.emplace_back(std::move(thread));
+                }
+            }
 
+            for (auto &t : threads){t.join();}
 			int ir = tripletListB.size();
 			tripletListA.emplace_back(ir     , 0, 1);
 			tripletListA.emplace_back(ir + 1 , 1, 1);
@@ -508,91 +723,98 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 			std::vector<Eigen::Triplet<double>> tripletListP;
 			std::vector<Eigen::Triplet<double>> tripletListB;
 
+            std::vector<std::thread> threads;
+            std::mutex mutex;
+
 			for(size_t i = 0 ; i < scan_poses.size() ; i++){
 				for(size_t j = i+1 ; j < scan_poses.size() ; j++){
-					//if(i == j)continue;
-					std::vector<std::pair<int,int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
-					std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size() << std::endl;
+					if(i == j)continue;
+                    auto thread = std::thread([&, i, j](){
 
-					RodriguesPose pose_1 = pose_rodrigues_from_affine_matrix(scan_poses[i].m);
-					RodriguesPose pose_2 = pose_rodrigues_from_affine_matrix(scan_poses[j].m);
+                        std::vector<std::pair<int,int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
+                        std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size() << std::endl;
 
-                                        for(size_t k = 0 ; k < nn.size(); k+=1){
-						pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
-						pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
-						double delta_x;
-						double delta_y;
-						double delta_z;
-						point_to_point_rodrigues_wc(delta_x, delta_y, delta_z,
-                                                                            pose_1.px, pose_1.py, pose_1.pz, pose_1.sx, pose_1.sy, pose_1.sz,
-                                                                            pose_2.px, pose_2.py, pose_2.pz, pose_2.sx, pose_2.sy, pose_2.sz,
-                                                                            p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+                        RodriguesPose pose_1 = pose_rodrigues_from_affine_matrix(scan_poses[i].m);
+                        RodriguesPose pose_2 = pose_rodrigues_from_affine_matrix(scan_poses[j].m);
+
+                                            for(size_t k = 0 ; k < nn.size(); k+=1){
+                            pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
+                            pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
+                            double delta_x;
+                            double delta_y;
+                            double delta_z;
+                            point_to_point_rodrigues_wc(delta_x, delta_y, delta_z,
+                                                                                pose_1.px, pose_1.py, pose_1.pz, pose_1.sx, pose_1.sy, pose_1.sz,
+                                                                                pose_2.px, pose_2.py, pose_2.pz, pose_2.sx, pose_2.sy, pose_2.sz,
+                                                                                p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
 
 
 
-                                                Eigen::Matrix<double, 3, 12, Eigen::RowMajor> jacobian;
-						point_to_point_rodrigues_wc_jacobian(jacobian,
-                                                                                     pose_1.px, pose_1.py, pose_1.pz, pose_1.sx, pose_1.sy, pose_1.sz,
-                                                                                     pose_2.px, pose_2.py, pose_2.pz, pose_2.sx, pose_2.sy, pose_2.sz,
-                                                                                     p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+                                                    Eigen::Matrix<double, 3, 12, Eigen::RowMajor> jacobian;
+                            point_to_point_rodrigues_wc_jacobian(jacobian,
+                                                                                         pose_1.px, pose_1.py, pose_1.pz, pose_1.sx, pose_1.sy, pose_1.sz,
+                                                                                         pose_2.px, pose_2.py, pose_2.pz, pose_2.sx, pose_2.sy, pose_2.sz,
+                                                                                         p_1.x, p_1.y, p_1.z, p_2.x, p_2.y, p_2.z);
+                            std::lock_guard<std::mutex> lck (mutex);
+                            int ir = tripletListB.size();
+                            int ic_1 = i * 6;
+                            int ic_2 = j * 6;
 
-						int ir = tripletListB.size();
-						int ic_1 = i * 6;
-						int ic_2 = j * 6;
+                            tripletListA.emplace_back(ir     , ic_1    , -jacobian(0,0));
+                            tripletListA.emplace_back(ir     , ic_1 + 1, -jacobian(0,1));
+                            tripletListA.emplace_back(ir     , ic_1 + 2, -jacobian(0,2));
+                            tripletListA.emplace_back(ir     , ic_1 + 3, -jacobian(0,3));
+                            tripletListA.emplace_back(ir     , ic_1 + 4, -jacobian(0,4));
+                            tripletListA.emplace_back(ir     , ic_1 + 5, -jacobian(0,5));
 
-						tripletListA.emplace_back(ir     , ic_1    , -jacobian(0,0));
-						tripletListA.emplace_back(ir     , ic_1 + 1, -jacobian(0,1));
-						tripletListA.emplace_back(ir     , ic_1 + 2, -jacobian(0,2));
-						tripletListA.emplace_back(ir     , ic_1 + 3, -jacobian(0,3));
-						tripletListA.emplace_back(ir     , ic_1 + 4, -jacobian(0,4));
-						tripletListA.emplace_back(ir     , ic_1 + 5, -jacobian(0,5));
+                            tripletListA.emplace_back(ir     , ic_2    , -jacobian(0,6));
+                            tripletListA.emplace_back(ir     , ic_2 + 1, -jacobian(0,7));
+                            tripletListA.emplace_back(ir     , ic_2 + 2, -jacobian(0,8));
+                            tripletListA.emplace_back(ir     , ic_2 + 3, -jacobian(0,9));
+                            tripletListA.emplace_back(ir     , ic_2 + 4, -jacobian(0,10));
+                            tripletListA.emplace_back(ir     , ic_2 + 5, -jacobian(0,11));
 
-						tripletListA.emplace_back(ir     , ic_2    , -jacobian(0,6));
-						tripletListA.emplace_back(ir     , ic_2 + 1, -jacobian(0,7));
-						tripletListA.emplace_back(ir     , ic_2 + 2, -jacobian(0,8));
-						tripletListA.emplace_back(ir     , ic_2 + 3, -jacobian(0,9));
-						tripletListA.emplace_back(ir     , ic_2 + 4, -jacobian(0,10));
-						tripletListA.emplace_back(ir     , ic_2 + 5, -jacobian(0,11));
+                            tripletListA.emplace_back(ir + 1 , ic_1    , -jacobian(1,0));
+                            tripletListA.emplace_back(ir + 1 , ic_1 + 1, -jacobian(1,1));
+                            tripletListA.emplace_back(ir + 1 , ic_1 + 2, -jacobian(1,2));
+                            tripletListA.emplace_back(ir + 1 , ic_1 + 3, -jacobian(1,3));
+                            tripletListA.emplace_back(ir + 1 , ic_1 + 4, -jacobian(1,4));
+                            tripletListA.emplace_back(ir + 1 , ic_1 + 5, -jacobian(1,5));
 
-						tripletListA.emplace_back(ir + 1 , ic_1    , -jacobian(1,0));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 1, -jacobian(1,1));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 2, -jacobian(1,2));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 3, -jacobian(1,3));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 4, -jacobian(1,4));
-						tripletListA.emplace_back(ir + 1 , ic_1 + 5, -jacobian(1,5));
+                            tripletListA.emplace_back(ir + 1 , ic_2    , -jacobian(1,6));
+                            tripletListA.emplace_back(ir + 1 , ic_2 + 1, -jacobian(1,7));
+                            tripletListA.emplace_back(ir + 1 , ic_2 + 2, -jacobian(1,8));
+                            tripletListA.emplace_back(ir + 1 , ic_2 + 3, -jacobian(1,9));
+                            tripletListA.emplace_back(ir + 1 , ic_2 + 4, -jacobian(1,10));
+                            tripletListA.emplace_back(ir + 1 , ic_2 + 5, -jacobian(1,11));
 
-						tripletListA.emplace_back(ir + 1 , ic_2    , -jacobian(1,6));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 1, -jacobian(1,7));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 2, -jacobian(1,8));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 3, -jacobian(1,9));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 4, -jacobian(1,10));
-						tripletListA.emplace_back(ir + 1 , ic_2 + 5, -jacobian(1,11));
+                            tripletListA.emplace_back(ir + 2 , ic_1    , -jacobian(2,0));
+                            tripletListA.emplace_back(ir + 2 , ic_1 + 1, -jacobian(2,1));
+                            tripletListA.emplace_back(ir + 2 , ic_1 + 2, -jacobian(2,2));
+                            tripletListA.emplace_back(ir + 2 , ic_1 + 3, -jacobian(2,3));
+                            tripletListA.emplace_back(ir + 2 , ic_1 + 4, -jacobian(2,4));
+                            tripletListA.emplace_back(ir + 2 , ic_1 + 5, -jacobian(2,5));
 
-						tripletListA.emplace_back(ir + 2 , ic_1    , -jacobian(2,0));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 1, -jacobian(2,1));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 2, -jacobian(2,2));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 3, -jacobian(2,3));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 4, -jacobian(2,4));
-						tripletListA.emplace_back(ir + 2 , ic_1 + 5, -jacobian(2,5));
+                            tripletListA.emplace_back(ir + 2 , ic_2    , -jacobian(2,6));
+                            tripletListA.emplace_back(ir + 2 , ic_2 + 1, -jacobian(2,7));
+                            tripletListA.emplace_back(ir + 2 , ic_2 + 2, -jacobian(2,8));
+                            tripletListA.emplace_back(ir + 2 , ic_2 + 3, -jacobian(2,9));
+                            tripletListA.emplace_back(ir + 2 , ic_2 + 4, -jacobian(2,10));
+                            tripletListA.emplace_back(ir + 2 , ic_2 + 5, -jacobian(2,11));
 
-						tripletListA.emplace_back(ir + 2 , ic_2    , -jacobian(2,6));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 1, -jacobian(2,7));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 2, -jacobian(2,8));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 3, -jacobian(2,9));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 4, -jacobian(2,10));
-						tripletListA.emplace_back(ir + 2 , ic_2 + 5, -jacobian(2,11));
+                            tripletListP.emplace_back(ir    , ir    ,  1);//cauchy(delta_x, 1));
+                            tripletListP.emplace_back(ir + 1, ir + 1,  1);//cauchy(delta_y, 1));
+                            tripletListP.emplace_back(ir + 2, ir + 2,  1);//cauchy(delta_z, 1));
 
-						tripletListP.emplace_back(ir    , ir    ,  1);//cauchy(delta_x, 1));
-						tripletListP.emplace_back(ir + 1, ir + 1,  1);//cauchy(delta_y, 1));
-						tripletListP.emplace_back(ir + 2, ir + 2,  1);//cauchy(delta_z, 1));
-
-						tripletListB.emplace_back(ir    , 0,  delta_x);
-						tripletListB.emplace_back(ir + 1, 0,  delta_y);
-						tripletListB.emplace_back(ir + 2, 0,  delta_z);
-					}
-				}
+                            tripletListB.emplace_back(ir    , 0,  delta_x);
+                            tripletListB.emplace_back(ir + 1, 0,  delta_y);
+                            tripletListB.emplace_back(ir + 2, 0,  delta_z);
+                        }
+                    });
+                    threads.emplace_back(std::move(thread));
+                }
 			}
-
+            for (auto &t : threads){t.join();}
 			int ir = tripletListB.size();
 			tripletListA.emplace_back(ir     , 0, 1);
 			tripletListA.emplace_back(ir + 1 , 1, 1);
@@ -684,76 +906,84 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 			std::vector<Eigen::Triplet<double>> tripletListP;
 			std::vector<Eigen::Triplet<double>> tripletListB;
 
+			std::vector<std::thread> threads;
+            std::mutex mutex;
 			for(size_t i = 0 ; i < scan_poses.size() ; i++){
 				Eigen::Affine3d pose_source = scan_poses[i].m;
 
 				for(size_t j = 0 ; j < scan_poses.size() ; j++){
 					if(i == j)continue;
-					std::vector<std::pair<int,int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
-					std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size() << std::endl;
 
-					//TaitBryanPose pose_1 = pose_tait_bryan_from_affine_matrix(scan_poses[i].m);
-					//TaitBryanPose pose_2 = pose_tait_bryan_from_affine_matrix(scan_poses[j].m);
+					auto thread = std::thread([&, i, j](){
+                        std::vector<std::pair<int,int>> nn = nns(scan_poses[i], scan_poses[j], sradius);
+                        std::cout << nn.size() << "," << scan_poses[i].pc.size() << "," << scan_poses[j].pc.size() << std::endl;
 
-					for(size_t k = 0 ; k < nn.size(); k+=1){
-						pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
-						pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
+                        //TaitBryanPose pose_1 = pose_tait_bryan_from_affine_matrix(scan_poses[i].m);
+                        //TaitBryanPose pose_2 = pose_tait_bryan_from_affine_matrix(scan_poses[j].m);
 
-						Eigen::Vector3d p_t(p_2.x, p_2.y, p_2.z);// = trajectory[j] * p_2;
-						Eigen::Vector3d p_s(p_1.x, p_1.y, p_1.z);// = p_1;
+                        for(size_t k = 0 ; k < nn.size(); k+=1){
+                            pcl::PointXYZ &p_1 = scan_poses[i].pc[nn[k].first];
+                            pcl::PointXYZ &p_2 = scan_poses[j].pc[nn[k].second];
 
-						int ir = tripletListB.size();
-						int ic_1 = i * 6;
-						Eigen::Matrix3d px;
-						px(0,0) = 0;
-						px(0,1) = -p_s.z();
-						px(0,2) =  p_s.y();
-						px(1,0) = p_s.z();
-						px(1,1) = 0;
-						px(1,2) = -p_s.x();
-						px(2,0) = -p_s.y();
-						px(2,1) = p_s.x();
-						px(2,2) = 0;
+                            Eigen::Vector3d p_t(p_2.x, p_2.y, p_2.z);// = trajectory[j] * p_2;
+                            Eigen::Vector3d p_s(p_1.x, p_1.y, p_1.z);// = p_1;
 
-						Eigen::Matrix3d R = pose_source.inverse().rotation();
-						Eigen::Matrix3d Rpx = R*px;
+                            int ir = tripletListB.size();
+                            int ic_1 = i * 6;
+                            Eigen::Matrix3d px;
+                            px(0,0) = 0;
+                            px(0,1) = -p_s.z();
+                            px(0,2) =  p_s.y();
+                            px(1,0) = p_s.z();
+                            px(1,1) = 0;
+                            px(1,2) = -p_s.x();
+                            px(2,0) = -p_s.y();
+                            px(2,1) = p_s.x();
+                            px(2,2) = 0;
 
-						tripletListA.emplace_back(ir     ,ic_1 + 0, R(0,0));
-						tripletListA.emplace_back(ir     ,ic_1 + 1, R(0,1));
-						tripletListA.emplace_back(ir     ,ic_1 + 2, R(0,2));
-						tripletListA.emplace_back(ir     ,ic_1 + 3, -Rpx(0,0));
-						tripletListA.emplace_back(ir     ,ic_1 + 4, -Rpx(0,1));
-						tripletListA.emplace_back(ir     ,ic_1 + 5, -Rpx(0,2));
+                            Eigen::Matrix3d R = pose_source.rotation();
+                            Eigen::Matrix3d Rpx = R*px;
 
-						tripletListA.emplace_back(ir + 1 ,ic_1 + 0, R(1,0));
-						tripletListA.emplace_back(ir + 1 ,ic_1 + 1, R(1,1));
-						tripletListA.emplace_back(ir + 1 ,ic_1 + 2, R(1,2));
-						tripletListA.emplace_back(ir + 1 ,ic_1 + 3, -Rpx(1,0));
-						tripletListA.emplace_back(ir + 1 ,ic_1 + 4, -Rpx(1,1));
-						tripletListA.emplace_back(ir + 1 ,ic_1 + 5, -Rpx(1,2));
+                            std::lock_guard<std::mutex> lck (mutex);
+                            tripletListA.emplace_back(ir     ,ic_1 + 0, R(0,0));
+                            tripletListA.emplace_back(ir     ,ic_1 + 1, R(0,1));
+                            tripletListA.emplace_back(ir     ,ic_1 + 2, R(0,2));
+                            tripletListA.emplace_back(ir     ,ic_1 + 3, -Rpx(0,0));
+                            tripletListA.emplace_back(ir     ,ic_1 + 4, -Rpx(0,1));
+                            tripletListA.emplace_back(ir     ,ic_1 + 5, -Rpx(0,2));
 
-						tripletListA.emplace_back(ir + 2 ,ic_1 + 0, R(2,0));
-						tripletListA.emplace_back(ir + 2 ,ic_1 + 1, R(2,1));
-						tripletListA.emplace_back(ir + 2 ,ic_1 + 2, R(2,2));
-						tripletListA.emplace_back(ir + 2 ,ic_1 + 3, -Rpx(2,0));
-						tripletListA.emplace_back(ir + 2 ,ic_1 + 4, -Rpx(2,1));
-						tripletListA.emplace_back(ir + 2 ,ic_1 + 5, -Rpx(2,2));
+                            tripletListA.emplace_back(ir + 1 ,ic_1 + 0, R(1,0));
+                            tripletListA.emplace_back(ir + 1 ,ic_1 + 1, R(1,1));
+                            tripletListA.emplace_back(ir + 1 ,ic_1 + 2, R(1,2));
+                            tripletListA.emplace_back(ir + 1 ,ic_1 + 3, -Rpx(1,0));
+                            tripletListA.emplace_back(ir + 1 ,ic_1 + 4, -Rpx(1,1));
+                            tripletListA.emplace_back(ir + 1 ,ic_1 + 5, -Rpx(1,2));
 
-
-						tripletListP.emplace_back(ir    , ir    ,  1);
-						tripletListP.emplace_back(ir + 1, ir + 1,  1);
-						tripletListP.emplace_back(ir + 2, ir + 2,  1);
+                            tripletListA.emplace_back(ir + 2 ,ic_1 + 0, R(2,0));
+                            tripletListA.emplace_back(ir + 2 ,ic_1 + 1, R(2,1));
+                            tripletListA.emplace_back(ir + 2 ,ic_1 + 2, R(2,2));
+                            tripletListA.emplace_back(ir + 2 ,ic_1 + 3, -Rpx(2,0));
+                            tripletListA.emplace_back(ir + 2 ,ic_1 + 4, -Rpx(2,1));
+                            tripletListA.emplace_back(ir + 2 ,ic_1 + 5, -Rpx(2,2));
 
 
-						Eigen::Vector3d target = scan_poses[i].m.inverse() * (scan_poses[j].m * p_t);
+                            tripletListP.emplace_back(ir    , ir    ,  1);
+                            tripletListP.emplace_back(ir + 1, ir + 1,  1);
+                            tripletListP.emplace_back(ir + 2, ir + 2,  1);
 
 
-						tripletListB.emplace_back(ir    , 0,  -(target.x() - p_s.x()));
-						tripletListB.emplace_back(ir + 1, 0,  -(target.y() - p_s.y()));
-						tripletListB.emplace_back(ir + 2, 0,  -(target.z() - p_s.z()));
-					}
-				}
-			}
+                            Eigen::Vector3d target = scan_poses[j].m * p_t;
+                            Eigen::Vector3d source = scan_poses[i].m * p_s;
+
+                            tripletListB.emplace_back(ir    , 0,  (target.x() - source.x()));
+                            tripletListB.emplace_back(ir + 1, 0,  (target.y() - source.y()));
+                            tripletListB.emplace_back(ir + 2, 0,  (target.z() - source.z()));
+                        }
+                    });
+					threads.emplace_back(std::move(thread));
+                }
+            }
+            for (auto &t : threads){t.join();}
 
 			int ir = tripletListB.size();
 			tripletListA.emplace_back(ir     , 0, 1);
@@ -834,7 +1064,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 					pose_update.sy = h_x[counter++];
 					pose_update.sz = h_x[counter++];
 
-					scan_poses[i].m = (scan_poses[i].m.inverse() * affine_matrix_from_pose_rodrigues(pose_update)).inverse();
+					scan_poses[i].m = scan_poses[i].m * affine_matrix_from_pose_rodrigues(pose_update);
 				}
 			}else{
 				std::cout << "AtPA=AtPB FAILED" << std::endl;
@@ -853,8 +1083,9 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 			break;		
 		} 
 		case '3':{
+            pcl::PointCloud<pcl::PointXYZ> pc;
 			for(size_t i = 0; i < scan_poses.size(); i++){
-				pcl::PointCloud<pcl::PointXYZ> pc;
+
 				for(size_t j = 0; j < scan_poses[i].pc.size(); j++){
 					Eigen::Vector3d v(scan_poses[i].pc[j].x, scan_poses[i].pc[j].y, scan_poses[i].pc[j].z);
 					Eigen::Vector3d vt = scan_poses[i].m * v;
@@ -864,9 +1095,10 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/) {
 					p.z = vt.z();
 					pc.push_back(p);
 				}
-				pcl::io::savePCDFileBinary(std::to_string(i) + ".pcd", pc);
-				std::cout << "file: " << std::to_string(i) + ".pcd" << std::endl;
+
  			}
+            pcl::io::savePCDFileBinary("metascan.pcd", pc);
+            std::cout << "writen"<< std::endl;
 			break;
 		}
 		case 'g':{
@@ -937,6 +1169,42 @@ void printHelp() {
 }
 
 void set_initial_guess(std::vector<ScanPose>& scan_poses){
+    const auto size = scan_poses.size();
+
+    scan_poses[0].m(0,0) = 0.380925;
+    scan_poses[0].m(0,1) = 0.924606;
+    scan_poses[0].m(0,3) = -6.06303;
+
+    scan_poses[0].m(1,0) = -0.924606;
+    scan_poses[0].m(1,1) = 0.380925;
+    scan_poses[0].m(1,3) = -8.2396;
+
+    if (size<=1) return;
+    scan_poses[1].m(0,0) = 0.710913;
+    scan_poses[1].m(0,1) = 0.70328;
+    scan_poses[1].m(0,3) = -1.03452;
+
+    scan_poses[1].m(1,0) = -0.70328;
+    scan_poses[1].m(1,1) = 0.710913;
+    scan_poses[1].m(1,3) = -7.77656;
+
+	if (size<=2) return;
+    scan_poses[2].m(0,0) = 0.613745;
+    scan_poses[2].m(0,1) = 0.789504;
+    scan_poses[2].m(0,3) = 3.99851;
+
+    scan_poses[2].m(1,0) = -0.789504;
+    scan_poses[2].m(1,1) = 0.613745;
+    scan_poses[2].m(1,3) = -8.18709;
+
+    if (size<=3) return;
+	scan_poses[3].m(0,0) =  0.891568;
+	scan_poses[3].m(0,1) = -0.452886;
+	scan_poses[3].m(0,3) = 6.52658;
+
+	scan_poses[3].m(1,0) = 0.452886;
+	scan_poses[3].m(1,1) = 0.891568;
+	scan_poses[3].m(1,3) = 14.5315;
 	scan_poses[0].m(0,0) = 0.380925;
 	scan_poses[0].m(0,1) = 0.924606;
 	scan_poses[0].m(0,3) = -6.06303;
@@ -945,6 +1213,7 @@ void set_initial_guess(std::vector<ScanPose>& scan_poses){
 	scan_poses[0].m(1,1) = 0.380925;
 	scan_poses[0].m(1,3) = -8.2396;
 
+    if (size<=1) return;
 	scan_poses[1].m(0,0) = 0.710913;
 	scan_poses[1].m(0,1) = 0.70328;
 	scan_poses[1].m(0,3) = -1.03452;
@@ -953,86 +1222,97 @@ void set_initial_guess(std::vector<ScanPose>& scan_poses){
 	scan_poses[1].m(1,1) = 0.710913;
 	scan_poses[1].m(1,3) = -7.77656;
 
+    if (size<=2) return;
 	scan_poses[2].m(0,0) = 0.613745;
 	scan_poses[2].m(0,1) = 0.789504;
 	scan_poses[2].m(0,3) = 3.99851;
 
-	scan_poses[2].m(1,0) = -0.789504;
-	scan_poses[2].m(1,1) = 0.613745;
-	scan_poses[2].m(1,3) = -8.18709;
+    scan_poses[2].m(1,0) = -0.789504;
+    scan_poses[2].m(1,1) = 0.613745;
+    scan_poses[2].m(1,3) = -8.18709;
 
-	scan_poses[3].m(0,0) = 0.751805;
-	scan_poses[3].m(0,1) = 0.659385;
-	scan_poses[3].m(0,3) = 9.99224;
+    if (size<=3) return;
+    scan_poses[3].m(0,0) = 0.751805;
+    scan_poses[3].m(0,1) = 0.659385;
+    scan_poses[3].m(0,3) = 9.99224;
 
-	scan_poses[3].m(1,0) = -0.659385;
-	scan_poses[3].m(1,1) = 0.751805;
-	scan_poses[3].m(1,3) = -8.54882;
+    scan_poses[3].m(1,0) = -0.659385;
+    scan_poses[3].m(1,1) = 0.751805;
+    scan_poses[3].m(1,3) = -8.54882;
 
-	scan_poses[4].m(0,0) = -0.996673;
-	scan_poses[4].m(0,1) = 0.0815022;
-	scan_poses[4].m(0,3) = 12.6963;
+    if (size<=4) return;
+    scan_poses[4].m(0,0) = -0.996673;
+    scan_poses[4].m(0,1) = 0.0815022;
+    scan_poses[4].m(0,3) = 12.6963;
 
-	scan_poses[4].m(1,0) = -0.0815022;
-	scan_poses[4].m(1,1) = -0.996673;
-	scan_poses[4].m(1,3) = -8.73861;
+    scan_poses[4].m(1,0) = -0.0815022;
+    scan_poses[4].m(1,1) = -0.996673;
+    scan_poses[4].m(1,3) = -8.73861;
 
-	scan_poses[5].m(0,0) = 0.639602;
-	scan_poses[5].m(0,1) = 0.768705;
-	scan_poses[5].m(0,3) = 17.8592;
+    if (size<=5) return;
+    scan_poses[5].m(0,0) = 0.639602;
+    scan_poses[5].m(0,1) = 0.768705;
+    scan_poses[5].m(0,3) = 17.8592;
 
-	scan_poses[5].m(1,0) = -0.768705;
-	scan_poses[5].m(1,1) = 0.639602;
-	scan_poses[5].m(1,3) = -2.78423;
+    scan_poses[5].m(1,0) = -0.768705;
+    scan_poses[5].m(1,1) = 0.639602;
+    scan_poses[5].m(1,3) = -2.78423;
 
-	scan_poses[6].m(0,0) = 0.745174;
-	scan_poses[6].m(0,1) = 0.66687;
-	scan_poses[6].m(0,3) = 22.9195;
+    if (size<=6) return;
+    scan_poses[6].m(0,0) = 0.745174;
+    scan_poses[6].m(0,1) = 0.66687;
+    scan_poses[6].m(0,3) = 22.9195;
 
-	scan_poses[6].m(1,0) = -0.66687;
-	scan_poses[6].m(1,1) = 0.745174;
-	scan_poses[6].m(1,3) = -1.98392;
+    scan_poses[6].m(1,0) = -0.66687;
+    scan_poses[6].m(1,1) = 0.745174;
+    scan_poses[6].m(1,3) = -1.98392;
 
-	scan_poses[7].m(0,0) = -0.0491839;
-	scan_poses[7].m(0,1) = 0.998789;
-	scan_poses[7].m(0,3) = 31.7827;
+    if (size<=7) return;
+    scan_poses[7].m(0,0) = -0.0491839;
+    scan_poses[7].m(0,1) = 0.998789;
+    scan_poses[7].m(0,3) = 31.7827;
 
-	scan_poses[7].m(1,0) = -0.998789;
-	scan_poses[7].m(1,1) = -0.0491839;
-	scan_poses[7].m(1,3) = -2.2143;
+    scan_poses[7].m(1,0) = -0.998789;
+    scan_poses[7].m(1,1) = -0.0491839;
+    scan_poses[7].m(1,3) = -2.2143;
 
-	scan_poses[8].m(0,0) = -0.128844;
-	scan_poses[8].m(0,1) = 0.991665;
-	scan_poses[8].m(0,3) = 39.0272;
+    if (size<=8) return;
+    scan_poses[8].m(0,0) = -0.128844;
+    scan_poses[8].m(0,1) = 0.991665;
+    scan_poses[8].m(0,3) = 39.0272;
 
-	scan_poses[8].m(1,0) = -0.991665;
-	scan_poses[8].m(1,1) = -0.128844;
-	scan_poses[8].m(1,3) = -2.29705;
+    scan_poses[8].m(1,0) = -0.991665;
+    scan_poses[8].m(1,1) = -0.128844;
+    scan_poses[8].m(1,3) = -2.29705;
 
-	scan_poses[9].m(0,0) = -0.34215;
-	scan_poses[9].m(0,1) = 0.939646;
-	scan_poses[9].m(0,3) = 48.1018;
+    if (size<=9) return;
+    scan_poses[9].m(0,0) = -0.34215;
+    scan_poses[9].m(0,1) = 0.939646;
+    scan_poses[9].m(0,3) = 48.1018;
 
-	scan_poses[9].m(1,0) = -0.939646;
-	scan_poses[9].m(1,1) = -0.34215;
-	scan_poses[9].m(1,3) = -1.94245;
+    scan_poses[9].m(1,0) = -0.939646;
+    scan_poses[9].m(1,1) = -0.34215;
+    scan_poses[9].m(1,3) = -1.94245;
 
-	scan_poses[10].m(0,0) = -0.158532;
-	scan_poses[10].m(0,1) = 0.987354;
-	scan_poses[10].m(0,3) = 54.2044;
+    if (size<=10) return;
+    scan_poses[10].m(0,0) = -0.158532;
+    scan_poses[10].m(0,1) = 0.987354;
+    scan_poses[10].m(0,3) = 54.2044;
 
-	scan_poses[10].m(1,0) = -0.987354;
-	scan_poses[10].m(1,1) = -0.158532;
-	scan_poses[10].m(1,3) = -7.96743;
+    scan_poses[10].m(1,0) = -0.987354;
+    scan_poses[10].m(1,1) = -0.158532;
+    scan_poses[10].m(1,3) = -7.96743;
 
-	scan_poses[11].m(0,0) = -0.197888;
-	scan_poses[11].m(0,1) = 0.980225;
-	scan_poses[11].m(0,3) = 65.5777;
+    if (size<=11) return;
+    scan_poses[11].m(0,0) = -0.197888;
+    scan_poses[11].m(0,1) = 0.980225;
+    scan_poses[11].m(0,3) = 65.5777;
 
-	scan_poses[11].m(1,0) = -0.980225;
-	scan_poses[11].m(1,1) = -0.197888;
-	scan_poses[11].m(1,3) = -8.39231;
+    scan_poses[11].m(1,0) = -0.980225;
+    scan_poses[11].m(1,1) = -0.197888;
+    scan_poses[11].m(1,3) = -8.39231;
 
+	if (size<=12) return;
 	scan_poses[12].m(0,0) = -0.360872;
 	scan_poses[12].m(0,1) = 0.932615;
 	scan_poses[12].m(0,3) = 78.1712;
